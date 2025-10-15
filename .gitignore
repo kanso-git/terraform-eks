@@ -1,0 +1,41 @@
+# ===========================================
+# 🌱 Terraform Git Ignore for GitHub Project
+# ===========================================
+
+# 🗂 Terraform state files
+*.tfstate
+*.tfstate.*
+*.backup
+
+# 🧾 Terraform plan output
+*.tfplan
+
+# 🛑 Crash logs
+crash.log
+
+# 📦 Terraform CLI local files
+.terraform/
+.terraform.lock.hcl
+
+# 🔐 Sensitive variable files (e.g., secrets, keys)
+*.tfvars
+!*/dev.tfvars
+!*/test.tfvars
+!*/prod.tfvars
+# Note: keep non-sensitive tfvars committed (adjust if needed)
+
+# 🧪 Ignore override files (used for temporary testing)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# 💬 Mac-specific system files
+.DS_Store
+
+# 🔧 Shell history and logs (if created)
+*.log
+*.sh.history
+
+# 👟 Bootstrap artifacts (optional, if script generates files)
+*.auto.tfvars
