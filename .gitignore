@@ -39,3 +39,5 @@ override.tf.json
 
 # 👟 Bootstrap artifacts (optional, if script generates files)
 *.auto.tfvars
+
+**/*kubeconfig*
