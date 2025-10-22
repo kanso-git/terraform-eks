@@ -1,51 +1,36 @@
-# =====================================================================
-# ⚙️ LOCALS — VPC MODULE
+#######################################################################
+# 🌐 VPC MODULE — Locals
 # ---------------------------------------------------------------------
-# Centralizes computed values and reusable logic for the VPC module.
-#
-# Includes:
-# - Logic to determine whether to reuse or create a VPC
-# - Pre-computed subnet maps for public/private subnet generation
-# - Common tagging scheme (merged with optional user-defined tags)
-# =====================================================================
+# Centralizes computed values for the VPC module:
+#  - Creation date fallback
+#  - Active VPC ID (new or existing)
+#  - Deterministic subnet maps for public/private subnets
+#  - First public AZ for NAT placement (deterministic)
+#  - Common tag map (env/owner/date + extra)
+#######################################################################
 
-# ------------------------------------------------------------
-# 🧩 Determine Active VPC ID
-# ------------------------------------------------------------
-# If the user provides an existing VPC ID, we reuse it.
-# Otherwise, we reference the newly created VPC.
-# ------------------------------------------------------------
 locals {
-  vpc_id = var.vpc_id != null ? var.vpc_id : aws_vpc.this[0].id
-}
+  # 🕓 Creation date (compute if empty)
+  creation_date = var.creation_date != "" ? var.creation_date : formatdate("YYYY-MM-DD", timestamp())
 
-# ------------------------------------------------------------
-# 🏷️ Common Tags for All Resources
-# ------------------------------------------------------------
-# Provides a unified tagging convention for the entire module.
-# Merges base tags with any extra tags provided by the user.
-# ------------------------------------------------------------
-locals {
-  common_tags = merge(
-    {
-      Environment  = var.environment,                         # dev/test/prod
-      Owner        = var.owner,                               # Ownership metadata
-      CreationDate = var.creation_date != "" ? var.creation_date : timestamp()                       # Passed via variable (static timestamp)
-      "kubernetes.io/cluster/${var.cluster_name}" = "shared"   # EKS cluster discovery tag
-    },
-    var.extra_tags                                             # Optional user-supplied tags
-  )
-}
+  # 🔗 Active VPC ID (created or existing)
+  vpc_id = var.create_vpc ? aws_vpc.this[0].id : var.existing_vpc_id
 
-# ------------------------------------------------------------
-# 🗺️ Subnet Grouping (for readability)
-# ------------------------------------------------------------
-# Combines AZs and CIDRs into logical subnet maps.
-# Used by aws_subnet resources in main.tf.
-# ------------------------------------------------------------
-locals {
+  # 🗺️ Subnet maps (AZ -> CIDR)
   subnets = {
-    public  = zipmap(var.azs, var.public_subnet_cidrs)        # AZ-to-CIDR map for public subnets
-    private = zipmap(var.azs, var.private_subnet_cidrs)       # AZ-to-CIDR map for private subnets
+    public  = { for idx, az in var.azs : az => var.public_subnet_cidrs[idx] }
+    private = { for idx, az in var.azs : az => var.private_subnet_cidrs[idx] }
   }
+
+  # 🧭 Deterministic ordering for picking a public subnet (NAT)
+  first_public_az = sort(keys(local.subnets.public))[0]
+
+  # 🏷️ Base + merged tags
+  base_tags = {
+    Environment  = var.environment
+    Owner        = var.owner
+    CreationDate = local.creation_date
+  }
+
+  common_tags = merge(local.base_tags, var.extra_tags)
 }

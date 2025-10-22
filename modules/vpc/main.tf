@@ -1,130 +1,112 @@
 # =====================================================================
-# 🏗️ VPC MODULE — Zurich Region (eu-central-2)
+# 🏗️ VPC MODULE — Region-Agnostic (works in eu-central-2 and others)
 # ---------------------------------------------------------------------
-# Creates a full network layer for an EKS cluster:
-# - Dedicated or existing VPC
-# - 3 Public and 3 Private Subnets
-# - Internet Gateway (IGW)
-# - One NAT Gateway (shared across AZs)
-# - Separate Route Tables for Public and Private traffic
+# Creates the network layer for an EKS cluster:
+#  - Optionally creates a new VPC (`var.create_vpc`), or reuses an existing VPC.
+#  - Creates public and private subnets across the provided AZs.
+#  - Attaches an Internet Gateway (IGW) and a single NAT Gateway (shared).
+#    For production HA, consider one NAT per AZ.
+#  - Separate route tables for public and private subnets.
 #
-# Includes:
-# - EKS-compatible tags
-# - Environment-based naming
-# - Static creation date (via var.creation_date)
+# Tagging:
+#  - Uses common tags from locals (env/owner/date) + extra tags.
+#  - Adds EKS discovery tag: "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+#    on VPC and all subnets, so EKS/ALB discover them.
 # =====================================================================
 
-# ------------------------------------------------------------
-# 🧱 Create a new VPC (if not provided)
-# ------------------------------------------------------------
+############################################
+# VPC (conditionally created)
+############################################
 resource "aws_vpc" "this" {
-  count = var.vpc_id == null ? 1 : 0                # Only create if no existing VPC provided
+  count = var.create_vpc ? 1 : 0
 
-  cidr_block           = var.vpc_cidr               # Example: 10.0.0.0/16
+  cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = {
-    Name         = "${var.environment}-vpc"
-    Environment  = var.environment
-    Owner        = var.owner
-    CreationDate = var.creation_date
+  tags = merge(local.common_tags, {
+    Name                                        = "${var.environment}-vpc"
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-  }
+  })
 }
 
-
-# ------------------------------------------------------------
-# 🌐 Internet Gateway
-# ------------------------------------------------------------
+############################################
+# Internet Gateway
+############################################
 resource "aws_internet_gateway" "this" {
   vpc_id = local.vpc_id
 
-  tags = {
-    Name         = "${var.environment}-igw"
-    Environment  = var.environment
-    Owner        = var.owner
-    CreationDate = var.creation_date
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-igw"
+  })
 }
 
-# ------------------------------------------------------------
-# ☁️ Elastic IP for NAT Gateway
-# ------------------------------------------------------------
+############################################
+# Elastic IP for NAT Gateway
+############################################
 resource "aws_eip" "nat" {
   domain = "vpc"
 
-  tags = {
-    Name         = "${var.environment}-nat-eip"
-    Environment  = var.environment
-    Owner        = var.owner
-    CreationDate = var.creation_date
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-nat-eip"
+  })
 }
 
-# ------------------------------------------------------------
-# 🌉 Public Subnets
-# ------------------------------------------------------------
+############################################
+# Public Subnets
+############################################
 resource "aws_subnet" "public" {
-  for_each = zipmap(var.azs, var.public_subnet_cidrs)
+  for_each = local.subnets.public
 
   vpc_id                  = local.vpc_id
   cidr_block              = each.value
   availability_zone       = each.key
   map_public_ip_on_launch = true
 
-  tags = {
-    Name         = "${var.environment}-public-${each.key}"
-    Environment  = var.environment
-    Type         = "public"
-    Owner        = var.owner
-    CreationDate = var.creation_date
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "kubernetes.io/role/elb" = "1"
-  }
+  tags = merge(local.common_tags, {
+    Name                                        = "${var.environment}-public-${each.key}",
+    Type                                        = "public",
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned",
+    "kubernetes.io/role/elb"                    = "1"
+  })
 }
 
-# ------------------------------------------------------------
-# 🔒 Private Subnets
-# ------------------------------------------------------------
+############################################
+# Private Subnets
+############################################
 resource "aws_subnet" "private" {
-  for_each = zipmap(var.azs, var.private_subnet_cidrs)
+  for_each = local.subnets.private
 
   vpc_id            = local.vpc_id
   cidr_block        = each.value
   availability_zone = each.key
 
-  tags = {
-    Name         = "${var.environment}-private-${each.key}"
-    Environment  = var.environment
-    Type         = "private"
-    Owner        = var.owner
-    CreationDate = var.creation_date
-    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "kubernetes.io/role/internal-elb" = "1"
-  }
+  tags = merge(local.common_tags, {
+    Name                                        = "${var.environment}-private-${each.key}",
+    Type                                        = "private",
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned",
+    "kubernetes.io/role/internal-elb"           = "1"
+  })
 }
 
-# ------------------------------------------------------------
-# 🌐 NAT Gateway
-# ------------------------------------------------------------
+############################################
+# NAT Gateway (shared across AZs)
+############################################
 resource "aws_nat_gateway" "this" {
   allocation_id = aws_eip.nat.id
-  subnet_id     = values(aws_subnet.public)[0].id   # Place NAT in the first public subnet
+  # Deterministically place the NAT in the lexicographically first public AZ
+  subnet_id = aws_subnet.public[local.first_public_az].id
 
-  tags = {
-    Name         = "${var.environment}-nat-gw"
-    Environment  = var.environment
-    Owner        = var.owner
-    CreationDate = var.creation_date
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-nat-gw"
+  })
 
   depends_on = [aws_internet_gateway.this]
 }
 
-# ------------------------------------------------------------
-# 🛣️ Public Route Table
-# ------------------------------------------------------------
+############################################
+# Public Route Table
+############################################
 resource "aws_route_table" "public" {
   vpc_id = local.vpc_id
 
@@ -133,17 +115,14 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.this.id
   }
 
-  tags = {
-    Name         = "${var.environment}-public-rt"
-    Environment  = var.environment
-    Owner        = var.owner
-    CreationDate = var.creation_date
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-public-rt"
+  })
 }
 
-# ------------------------------------------------------------
-# 🛣️ Private Route Table
-# ------------------------------------------------------------
+############################################
+# Private Route Table
+############################################
 resource "aws_route_table" "private" {
   vpc_id = local.vpc_id
 
@@ -152,17 +131,14 @@ resource "aws_route_table" "private" {
     nat_gateway_id = aws_nat_gateway.this.id
   }
 
-  tags = {
-    Name         = "${var.environment}-private-rt"
-    Environment  = var.environment
-    Owner        = var.owner
-    CreationDate = var.creation_date
-  }
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-private-rt"
+  })
 }
 
-# ------------------------------------------------------------
-# 🔗 Subnet Associations
-# ------------------------------------------------------------
+############################################
+# Route Table Associations
+############################################
 resource "aws_route_table_association" "public_assoc" {
   for_each = aws_subnet.public
 

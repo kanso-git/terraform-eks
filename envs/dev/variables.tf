@@ -1,30 +1,23 @@
 # =====================================================================
-# 🌱 ENVIRONMENT VARIABLES — DEVELOPMENT
+# 🌐 DEV ENVIRONMENT — INPUT VARIABLES
 # ---------------------------------------------------------------------
-# Defines the inputs required by the "dev" environment.
+# Defines all input variables for the "dev" environment.
+# These variables feed values into the VPC, IAM, and EKS modules.
 #
-# These variables are passed to the VPC and EKS modules.
-#   - VPC: Networking and subnet configuration
-#   - EKS: Cluster name, version, IAM role, node groups
-#
-# Structure:
-#   1. AWS and Environment Settings
-#   2. Networking (VPC/Subnets)
-#   3. Metadata (Tags, Owner, Creation Date)
-#   4. EKS-Specific Variables (added below)
+# The file is intentionally explicit (no hidden defaults) to ensure
+# isolation between environments (dev, test, prod).
 # =====================================================================
 
 
 # ------------------------------------------------------------
 # ☁️ AWS REGION
 # ------------------------------------------------------------
-# Defines the AWS region where this environment is deployed.
-# This should match the backend S3 region and your provider region.
+# Must match the backend S3 bucket region and the provider region.
 # ------------------------------------------------------------
 variable "aws_region" {
-  description = "AWS region for the dev environment."
+  description = "AWS region for the test environment."
   type        = string
-  default     = "eu-central-2" # Zurich region
+  default     = "eu-central-2"
 }
 
 
@@ -32,130 +25,75 @@ variable "aws_region" {
 # ☸️ CLUSTER NAME
 # ------------------------------------------------------------
 # Unique name for the EKS cluster.
-# Used in tagging and Kubernetes context naming.
+# Used in tagging, IAM role names, and context.
 # ------------------------------------------------------------
 variable "cluster_name" {
-  description = "Name of the EKS cluster to be deployed in this environment."
+  description = "EKS cluster name for the test environment."
   type        = string
 }
 
 
 # ------------------------------------------------------------
-# 🌐 VPC CIDR BLOCK
+# 🌐 VPC CONFIGURATION
 # ------------------------------------------------------------
-# CIDR block for the main VPC in this environment.
+# CIDR range and subnet configuration for the VPC.
+# Public subnets are only needed for ALBs/NLBs (Ingress).
 # ------------------------------------------------------------
 variable "vpc_cidr" {
-  description = "CIDR range for the development VPC (e.g., 10.0.0.0/16)."
+  description = "CIDR range for the VPC."
   type        = string
 }
 
-
-# ------------------------------------------------------------
-# 🌍 AVAILABILITY ZONES
-# ------------------------------------------------------------
-# List of AZs within the target AWS region.
-# Example: ["eu-central-2a", "eu-central-2b", "eu-central-2c"]
-# ------------------------------------------------------------
 variable "azs" {
-  description = "List of availability zones in Zurich region (eu-central-2)."
+  description = "List of Availability Zones used for subnets."
   type        = list(string)
 }
 
-
-# ------------------------------------------------------------
-# 🌐 PUBLIC SUBNET CIDRS
-# ------------------------------------------------------------
-# CIDR blocks for each public subnet, one per AZ.
-# ------------------------------------------------------------
 variable "public_subnet_cidrs" {
-  description = "List of CIDR blocks for public subnets (one per AZ)."
+  description = "CIDR blocks for public subnets."
   type        = list(string)
 }
 
-
-# ------------------------------------------------------------
-# 🔒 PRIVATE SUBNET CIDRS
-# ------------------------------------------------------------
-# CIDR blocks for each private subnet, one per AZ.
-# Used for internal workloads, EKS nodes, and databases.
-# ------------------------------------------------------------
 variable "private_subnet_cidrs" {
-  description = "List of CIDR blocks for private subnets (one per AZ)."
+  description = "CIDR blocks for private subnets."
   type        = list(string)
 }
 
 
 # ------------------------------------------------------------
-# 🌱 ENVIRONMENT IDENTIFIER
-# ------------------------------------------------------------
-# Used to distinguish between environments (dev, test, prod).
+# 🌱 ENVIRONMENT METADATA
 # ------------------------------------------------------------
 variable "environment" {
-  description = "Environment identifier (dev, test, prod)."
+  description = "Environment name identifier (e.g., dev, test, prod)."
   type        = string
 }
 
-
-# ------------------------------------------------------------
-# 👤 RESOURCE OWNER
-# ------------------------------------------------------------
-# Indicates who is responsible for this environment’s resources.
-# ------------------------------------------------------------
 variable "owner" {
-  description = "Resource owner or responsible team."
+  description = "Owner or responsible team for this environment."
   type        = string
   default     = "experts-lab.com"
 }
 
-
-# ------------------------------------------------------------
-# 🏷️ EXTRA CUSTOM TAGS
-# ------------------------------------------------------------
-# Used to add optional metadata to all AWS resources.
-# Example:
-#   extra_tags = {
-#     Project    = "EKS-MultiEnv"
-#     CostCenter = "CC-DEV-001"
-#   }
-# ------------------------------------------------------------
 variable "extra_tags" {
-  description = "Additional tags to apply to all resources in this environment."
+  description = "Additional custom tags applied to all resources."
   type        = map(string)
   default     = {}
 }
 
-
 # ------------------------------------------------------------
 # 🕓 CREATION DATE
 # ------------------------------------------------------------
-# Useful for auditing, tagging, and lifecycle policies.
+# Dynamically set in locals (in main.tf).  Keep empty here.
 # ------------------------------------------------------------
 variable "creation_date" {
-  description = "Timestamp for resource creation tracking."
+  description = "Static creation date (populated automatically at runtime)."
   type        = string
-  default     = "2025-10-10"
+  default     = ""
 }
 
 
-
-# =====================================================================
-# ☸️ EKS-SPECIFIC VARIABLES — DEVELOPMENT
-# ---------------------------------------------------------------------
-# Defines inputs required for EKS deployment:
-#   - Cluster version
-#   - Control plane IAM role
-#   - Node group configuration
-# =====================================================================
-
-
 # ------------------------------------------------------------
-# 🧩 CLUSTER VERSION
-# ------------------------------------------------------------
-# Defines the Kubernetes version for the EKS cluster.
-# Keep aligned with the latest AWS-supported version.
-# Default is inherited from `global/variables.tf`, but can
-# be overridden per environment if needed.
+# ☸️ EKS SETTINGS
 # ------------------------------------------------------------
 variable "cluster_version" {
   description = "Kubernetes version for the EKS cluster."
@@ -165,41 +103,52 @@ variable "cluster_version" {
 
 
 # ------------------------------------------------------------
-# 🔐 CLUSTER ROLE ARN
-# ------------------------------------------------------------
-# IAM role ARN assigned to the EKS control plane.
-# This role allows EKS to manage AWS resources (EC2, ELB, etc.).
-# Typically created via a dedicated IAM module.
-# ------------------------------------------------------------
-variable "cluster_role_arn" {
-  description = "IAM role ARN for the EKS control plane."
-  type        = string
-  default     = "arn:aws:iam::344230058523:role/EKSClusterRole" # 🔧 Replace with actual ARN
-}
-
-
-# ------------------------------------------------------------
-# 🧑‍💻 NODE GROUP CONFIGURATION
-# ------------------------------------------------------------
-# Defines worker node group behavior:
-#   - desired_capacity: number of initial nodes
-#   - min_size / max_size: autoscaling limits
-#   - instance_types: EC2 instance types used by nodes
+# 🧩 NODE GROUP CONFIGURATION
 # ------------------------------------------------------------
 variable "node_groups" {
-  description = "Map of managed node group configurations for EKS."
+  description = "Map of node group definitions (scaling, instance types)."
   type = map(object({
     desired_capacity = number
     min_size         = number
     max_size         = number
     instance_types   = list(string)
   }))
-  default = {
-    general = {
-      desired_capacity = 1
-      min_size         = 0
-      max_size         = 3
-      instance_types   = ["c7i-flex.large"]
-    }
-  }
+}
+
+
+# ------------------------------------------------------------
+# 🔒 EKS ACCESS & API ENDPOINT
+# ------------------------------------------------------------
+# Controls whether the cluster API is reachable privately,
+# publicly, or both. Used for security-hardening scenarios.
+# ------------------------------------------------------------
+variable "enable_endpoint_public_access" {
+  description = "Allow public access to the EKS API endpoint."
+  type        = bool
+  default     = true
+}
+
+variable "enable_endpoint_private_access" {
+  description = "Enable private access to the EKS API endpoint."
+  type        = bool
+  default     = false
+}
+
+
+# ------------------------------------------------------------
+# 🧾 EKS ACCESS CONFIGURATION (Optional)
+# ------------------------------------------------------------
+# Allows you to define how the cluster is authenticated and
+# whether the creator gets admin access automatically.
+# ------------------------------------------------------------
+variable "authentication_mode" {
+  description = "EKS cluster authentication mode (optional, e.g., API)."
+  type        = string
+  default     = ""
+}
+
+variable "bootstrap_cluster_creator_admin_permissions" {
+  description = "Grant cluster creator admin access automatically."
+  type        = bool
+  default     = false
 }

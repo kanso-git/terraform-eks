@@ -1,133 +1,98 @@
 # =====================================================================
-# 🌐 DEVELOPMENT ENVIRONMENT — MAIN TERRAFORM CONFIGURATION
+# ☸️ DEV ENVIRONMENT — MAIN TERRAFORM CONFIGURATION
 # ---------------------------------------------------------------------
-# This file orchestrates all infrastructure components for the "dev"
-# environment. It defines and connects modules in the correct order:
+# Deploys a complete EKS environment including:
+#   • VPC networking
+#   • IAM role for EKS control plane
+#   • EKS control plane and managed node groups
 #
-#   1. 🌍 VPC Module — creates the networking foundation.
-#   2. ☸️ EKS Module — deploys the Kubernetes cluster on top of the VPC.
-#
-# Global variables and providers are defined externally (in `global/`),
-# ensuring consistent configurations across environments (dev/test/prod).
-#
-# Executed commands:
-#   terraform init -backend-config=backend.conf -reconfigure
-#   terraform plan -var-file="dev.tfvars"
-#   terraform apply -var-file="dev.tfvars"
+# Modules are reusable and environment-scoped (dev, test, prod).
 # =====================================================================
 
-
 ############################################################
-# ☁️ AWS Provider Configuration — Development
+# 🕓 LOCALS
 ############################################################
-# Defines the AWS provider and region for this environment.
-# The provider must be declared at the root level, not in modules.
-# ------------------------------------------------------------
-provider "aws" {
-  region  = "eu-central-2"      # Zurich region
-  # profile = "terraform-mfa"   # Uncomment for local AWS CLI usage
+# Compute a dynamic creation date once at runtime.
+############################################################
+locals {
+  creation_date = formatdate("YYYY-MM-DD", timestamp())
 }
 
-
 ############################################################
-# 🌍 Global Configuration (Optional)
+# 🧱 STAGE 1 — VPC
 ############################################################
-# Imports shared settings from the `global` folder.
-# This module provides:
-#   - Global variables (region, profile, cluster_version)
-#   - Any shared resources or defaults
-############################################################
-module "global" {
-  source = "../../global"
-}
-
-
-# =====================================================================
-# 🧱 STAGE 1 — VPC MODULE
-# ---------------------------------------------------------------------
-# Provisions a dedicated VPC with public and private subnets for EKS.
-# Outputs from this module (VPC ID, subnets, tags) will be passed
-# directly to the EKS module.
-# =====================================================================
 module "vpc" {
   source = "../../modules/vpc"
 
-  # ----------------------------------------------------------
-  # 🌍 Environment Metadata
-  # ----------------------------------------------------------
-  environment   = var.environment
-  cluster_name  = var.cluster_name
-  creation_date = var.creation_date
-
-  # ----------------------------------------------------------
-  # 🧱 Networking Configuration
-  # ----------------------------------------------------------
+  # Networking
+  create_vpc           = true
+  existing_vpc_id      = null
   vpc_cidr             = var.vpc_cidr
+  cluster_name         = var.cluster_name
   azs                  = var.azs
   public_subnet_cidrs  = var.public_subnet_cidrs
   private_subnet_cidrs = var.private_subnet_cidrs
+
+  # Metadata & tagging
+  environment   = var.environment
+  owner         = var.owner
+  extra_tags    = var.extra_tags
+  creation_date = local.creation_date
 }
 
-# =====================================================================
-# 🔐 IAM MODULE — EKS CLUSTER ROLE
-# ---------------------------------------------------------------------
-# Creates the IAM role and policies required for the EKS control plane.
-# This module must run before the EKS cluster module.
-# =====================================================================
+############################################################
+# 🔐 STAGE 2 — IAM
+############################################################
 module "iam" {
-  source = "../../modules/iam"
+  source            = "../../modules/iam"
+  cluster_role_name = "EKSClusterRole-${var.environment}"
+
+  environment   = var.environment
+  owner         = var.owner
+  extra_tags    = var.extra_tags
+  creation_date = local.creation_date
 }
 
-# =====================================================================
-# ☸️ STAGE 2 — EKS MODULE
-# ---------------------------------------------------------------------
-# Deploys an Amazon EKS cluster within the newly created VPC.
-# It uses:
-#   - VPC outputs (for networking)
-#   - Global settings (for version and region)
-#   - Environment variables (for naming, tags)
-#
-# The EKS module handles:
-#   - Cluster creation
-#   - Node groups (scalable worker nodes)
-#   - Security groups and IAM roles
-#   - Tag propagation for cost tracking
-# =====================================================================
+############################################################
+# ☸️ STAGE 3 — EKS
+############################################################
 module "eks" {
   source = "../../modules/eks"
 
-  # ----------------------------------------------------------
-  # ☸️ Cluster Core Settings
-  # ----------------------------------------------------------
-  cluster_name    = var.cluster_name
-  cluster_version = var.cluster_version
+  cluster_name     = var.cluster_name
+  cluster_version  = var.cluster_version
+  cluster_role_arn = module.iam.eks_cluster_role_arn
 
-
-
-  # ----------------------------------------------------------
-  # 🧱 Networking — Linked from the VPC module
-  # ----------------------------------------------------------
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_subnet_ids
   public_subnet_ids  = module.vpc.public_subnet_ids
 
-  
-  # ----------------------------------------------------------
-  # 🔐 IAM & Role Configuration
-  # ----------------------------------------------------------
-  # Use the dynamically created IAM role from the IAM module
-  cluster_role_arn = module.iam.eks_cluster_role_arn
-
-
-  # ----------------------------------------------------------
-  # 🧑‍💻 Node Group Settings
-  # ----------------------------------------------------------
-  # Map of node group configurations (instance type, scaling, etc.)
   node_groups = var.node_groups
 
-  # ----------------------------------------------------------
-  # 🏷️ Tagging & Traceability
-  # ----------------------------------------------------------
-  # Combine base tags from the VPC with any environment-specific tags.
-  tags = merge(module.vpc.base_tags, var.extra_tags)
+  environment   = var.environment
+  owner         = var.owner
+  extra_tags    = var.extra_tags
+  creation_date = local.creation_date
+
+  enable_endpoint_public_access  = var.enable_endpoint_public_access
+  enable_endpoint_private_access = var.enable_endpoint_private_access
+
+  # EKS access control
+  authentication_mode                         = var.authentication_mode
+  bootstrap_cluster_creator_admin_permissions = var.bootstrap_cluster_creator_admin_permissions
+}
+
+############################################################
+# 📤 OUTPUTS
+############################################################
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+
+output "cluster_name" {
+  value = module.eks.cluster_name
+}
+
+output "cluster_endpoint" {
+  value = module.eks.cluster_endpoint
 }

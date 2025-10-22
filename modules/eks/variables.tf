@@ -1,161 +1,113 @@
-# =====================================================================
-# ☸️ VARIABLES — EKS MODULE
+#######################################################################
+# ☸️ EKS MODULE — Input Variables
 # ---------------------------------------------------------------------
-# This file defines all input variables used by the EKS module.
-# It serves as the single point of configuration for EKS-related
-# parameters such as:
-#   - Cluster name and version
-#   - Networking (VPC ID, subnet IDs)
-#   - IAM roles and permissions
-#   - Node group definitions (instance types, scaling, etc.)
-#   - Tags for traceability and cost allocation
-#
-# All values are typically passed from environment-level files
-# (e.g., envs/dev/main.tf + dev.tfvars) or derived from global modules.
-#
-# This module is designed to be reusable across environments:
-#   - dev
-#   - test
-#   - prod
-#
-# ⚙️ Note:
-#   - The AWS provider must already be initialized at the environment level.
-#   - The VPC module should be deployed first to provide the required inputs:
-#       * vpc_id
-#       * private_subnet_ids
-#       * public_subnet_ids (optional for ALBs)
-# =====================================================================
+# Defines all configurable inputs for the EKS module.
+# Removes dynamic defaults (e.g., function calls in defaults) and
+# delegates dynamic computation to locals.tf.
+#######################################################################
 
-
-# ------------------------------------------------------------
-# ☸️ EKS CLUSTER NAME
-# ------------------------------------------------------------
-# The name assigned to the EKS cluster.
-# Used across resources for tagging and identification.
-# ------------------------------------------------------------
 variable "cluster_name" {
   description = "Name of the EKS cluster (e.g., eks-dev-cluster)."
   type        = string
 }
 
-
-# ------------------------------------------------------------
-# 🧩 CLUSTER VERSION
-# ------------------------------------------------------------
-# Specifies the Kubernetes version to use for the EKS cluster.
-# This can be set globally in `global/variables.tf` for consistency.
-# ------------------------------------------------------------
 variable "cluster_version" {
-  description = "Kubernetes version to deploy (e.g., 1.33)."
+  description = "Kubernetes version for the EKS control plane."
   type        = string
   default     = "1.33"
 }
 
+variable "cluster_role_arn" {
+  description = "IAM role ARN for the EKS control plane (with EKSClusterPolicy and EKSServicePolicy)."
+  type        = string
+}
 
-# ------------------------------------------------------------
-# 🧱 VPC ID
-# ------------------------------------------------------------
-# The ID of the VPC where the EKS cluster and node groups will run.
-# Passed from the VPC module via module output.
-# ------------------------------------------------------------
 variable "vpc_id" {
   description = "VPC ID where the EKS cluster will be deployed."
   type        = string
 }
 
-
-# ------------------------------------------------------------
-# 🌐 SUBNETS
-# ------------------------------------------------------------
-# The subnets used by the EKS cluster:
-#   - private_subnet_ids: used for worker nodes and control plane
-#   - public_subnet_ids: (optional) used for load balancers
-# ------------------------------------------------------------
 variable "private_subnet_ids" {
-  description = "List of private subnet IDs for EKS nodes."
+  description = "Private subnets for worker nodes."
   type        = list(string)
 }
 
 variable "public_subnet_ids" {
-  description = "List of public subnet IDs for load balancers (optional)."
+  description = "Public subnets for load balancers."
   type        = list(string)
   default     = []
 }
 
-
-# ------------------------------------------------------------
-# 🧠 CLUSTER ROLE ARN
-# ------------------------------------------------------------
-# The IAM role used by the EKS control plane to interact with
-# AWS resources such as EC2, ELB, etc.
-# Usually created by an IAM module or inline here.
-# ------------------------------------------------------------
-variable "cluster_role_arn" {
-  description = "IAM role ARN for the EKS control plane."
-  type        = string
-}
-
-
-# ------------------------------------------------------------
-# 🧑‍💻 NODE GROUP CONFIGURATION
-# ------------------------------------------------------------
-# Defines worker node groups for the cluster.
-# Each node group can have its own instance type, scaling, etc.
-# ------------------------------------------------------------
 variable "node_groups" {
-  description = <<EOT
-Configuration for one or more managed node groups.
-Each entry in this map defines:
-  - desired_capacity
-  - min_size
-  - max_size
-  - instance_types
-Example:
-  node_groups = {
-    general = {
-      desired_capacity = 2
-      min_size         = 1
-      max_size         = 3
-      instance_types   = ["t3.medium"]
-    }
-  }
-EOT
+  description = "Configuration for EKS managed node groups."
   type = map(object({
     desired_capacity = number
     min_size         = number
     max_size         = number
     instance_types   = list(string)
   }))
+  default = {}
 }
 
-
-# ------------------------------------------------------------
-# 🔒 SECURITY GROUP ADDITIONAL RULES (OPTIONAL)
-# ------------------------------------------------------------
-# Allows adding custom inbound/outbound rules to the EKS cluster
-# or worker node security groups if needed.
-# ------------------------------------------------------------
-variable "additional_sg_rules" {
-  description = "Optional additional security group rules for the cluster."
-  type = list(object({
-    type        = string
-    from_port   = number
-    to_port     = number
-    protocol    = string
-    cidr_blocks = list(string)
-  }))
-  default = []
+variable "node_role_name" {
+  description = "Name for the IAM role used by worker nodes. Computed dynamically if left empty."
+  type        = string
+  default     = ""
 }
 
+variable "node_role_policy_arns" {
+  description = "IAM policy ARNs to attach to node IAM role."
+  type        = list(string)
+  default = [
+    "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  ]
+}
 
-# ------------------------------------------------------------
-# 🏷️ TAGS
-# ------------------------------------------------------------
-# Tags applied to all EKS-related resources for tracking.
-# Merge this with global or environment tags at the environment level.
-# ------------------------------------------------------------
-variable "tags" {
-  description = "Common tags to apply to all EKS resources."
+variable "enable_endpoint_public_access" {
+  description = "Allow public API server endpoint access."
+  type        = bool
+  default     = true
+}
+
+variable "enable_endpoint_private_access" {
+  description = "Allow private API server endpoint access."
+  type        = bool
+  default     = false
+}
+
+variable "environment" {
+  description = "Environment name (e.g., dev, test, prod)."
+  type        = string
+}
+
+variable "owner" {
+  description = "Owner or responsible team for tagging."
+  type        = string
+  default     = "experts-lab.com"
+}
+
+variable "creation_date" {
+  description = "Static creation date (YYYY-MM-DD). Leave empty to auto-generate dynamically."
+  type        = string
+  default     = ""
+}
+
+variable "extra_tags" {
+  description = "Additional user-defined tags."
   type        = map(string)
   default     = {}
+}
+
+variable "authentication_mode" {
+  description = "EKS authentication mode (CONFIG_MAP, API_AND_CONFIG_MAP, or API)."
+  type        = string
+  default     = null
+}
+
+variable "bootstrap_cluster_creator_admin_permissions" {
+  description = "Bootstrap an access entry granting cluster admin permissions to the creator."
+  type        = bool
+  default     = null
 }
