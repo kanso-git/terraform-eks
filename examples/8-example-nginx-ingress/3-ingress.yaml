@@ -1,0 +1,19 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp
+  namespace: 8-example
+spec:
+  ingressClassName: external-nginx # k get ingressclasses.networking.k8s.io to see available classes
+  rules:
+    - host: speakup-lab.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp
+                port:
+                  number: 8080

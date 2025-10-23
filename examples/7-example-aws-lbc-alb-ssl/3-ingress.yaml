@@ -1,0 +1,47 @@
+---
+# Supported annotations
+# https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.7/guide/ingress/annotations/
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp
+  namespace: 7-example
+  annotations:
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-central-2:344230058523:certificate/729cebb4-3f6c-41d4-9f74-79677bb3e5ac
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/actions.redirect-www-to-root: >
+      {"Type": "redirect", "RedirectConfig": {
+        "Host": "speakup-lab.site",
+        "Protocol": "HTTPS",
+        "Port": "443",
+        "StatusCode": "HTTP_301"
+      }}
+spec:
+  ingressClassName: alb # k get ingressclasses.networking.k8s.io to see available classes
+  rules:
+   # 1️⃣ Redirect rule for www.speakup-lab.site must exist on route 53 type A or ALIAS record
+    - host: www.speakup-lab.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirect-www-to-root
+                port:
+                  name: use-annotation  # tells ALB to use the redirect action
+   # 2️⃣ Main HTTPS rule for your app 
+    - host: speakup-lab.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: myapp
+                port:
+                  number: 8080
